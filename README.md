@@ -37,8 +37,8 @@ Output is a JSON file plus a matching XLSX spreadsheet, ready for review.
 ## Installation
 
 ```bash
-git clone https://github.com/CreativeWords/NLP-AI-Term-Extractor.git
-cd NLP-AI-Term-Extractor
+git clone https://github.com/CreativeWords/NLP-and-AI-Term-Extractor.git
+cd NLP-and-AI-Term-Extractor
 pip install -r requirements.txt
 ```
 
