@@ -1,0 +1,179 @@
+# =============================================================================
+# Terminology Extractor — AI prompts
+# =============================================================================
+# This file holds the prompts sent to the selected AI model (Anthropic or
+# OpenAI) for the tool's AI steps. It must sit next to the script.
+#
+# Edit the prompt text freely; do NOT rename the top-level keys or remove the
+# {{PLACEHOLDERS}}, which the script fills in. All four keys are required:
+#
+#   cleaning                : whole-list merge/rename/drop decisions by id
+#   translation             : translation + definition of source terms
+#                             (Translate + define step)
+#   tmx_translation         : extraction of verified target terms from
+#                             TMX-aligned examples, plus a definition
+#                             (Translate + define step)
+#   tmx_language_resolution : maps the user's target language onto the
+#                             codes found in each TMX file (pre-flight)
+#
+# Placeholders used by each prompt:
+#   cleaning                : {{DOMAIN}}, {{CONTEXT}}
+#   translation             : {{DOMAIN}}, {{CONTEXT}}, {{TARGET_LANGUAGE}},
+#                             {{DEFINITION_LANGUAGE}}
+#   tmx_translation         : {{DOMAIN}}, {{CONTEXT}}, {{TARGET_LANGUAGE}},
+#                             {{DEFINITION_LANGUAGE}}
+#   tmx_language_resolution : {{TARGET_LANGUAGE}}, {{FILES_JSON}}
+#
+# The "|" after each key starts a YAML block scalar: everything indented
+# beneath it is treated as literal multi-line text, so no quoting/escaping is
+# needed. Keep the indentation consistent (2 spaces).
+# =============================================================================
+
+cleaning: |
+  You are a terminology specialist building a bilingual glossary for a translation project. You will receive a JSON array of candidate source terms automatically extracted via NLP from the source material.
+
+  Source material specifics:
+  Domain: {{DOMAIN}}
+  Context: {{CONTEXT}}
+
+  Each candidate is an object with:
+    - "id": a unique integer you MUST use to refer to the term
+    - "source_term": the extracted surface form
+    - "seg_count": number of distinct source segments the term appears in
+    - "raw_freq": total number of occurrences across all segments
+    - "examples": up to three sample sentences showing the term in context (the target term is wrapped in **double asterisks**)
+
+  Use the examples to judge whether an entry is a genuine term and to determine its canonical form. The counts are importance signals, not decision rules on their own. The extraction is noisy: it contains entries that are not valid terms, plus valid terms wrapped in noise. Your job is to decide, for each term, whether to KEEP it as-is, RENAME it to a corrected form, MERGE it with other variants, or DROP it — and to return those decisions, NOT a rewritten list.
+
+  KEEP (by omission): meaningful domain-specific terms already in correct canonical form — specialized concepts, named components/products, techniques and procedures, standards and acronyms, established multi-word collocations, and any vocabulary whose consistent, correct translation matters. Do not emit a decision for these; anything you do not mention is kept unchanged.
+
+  RENAME (fix a single term whose meaning is valid but whose surface form needs normalising):
+    - Strip leading/trailing articles and determiners ("the syringe barrel" -> "syringe barrel").
+    - Remove extraneous adjectives, quantifiers, or adverbs not part of the term ("large cervical os" -> "cervical os").
+    - Normalize plural nouns to singular where singular is canonical ("balloons" -> "balloon").
+    - Lemmatize other inflected word forms to their base form only when necessary ("inserted" -> "insert"); otherwise leave word forms unchanged.
+    - Keep established multi-word terms and proper domain-specific forms in their conventional form even when plural ("vaginal fornices", "instructions for use"); do not singularize these.
+    - Preserve exact product/component/proper names and their conventional casing.
+    - Trim stray punctuation, leftover prepositions, dangling conjunctions, and whitespace; fix obvious casing, keeping acronyms uppercase.
+    If stripping the noise leaves no real term, DROP it instead of renaming.
+
+  MERGE (collapse spelling/morphological/variant forms of the same concept into one canonical entry): choose one id as canonical, list the others, and give the canonical surface form. Merge singular/plural pairs, determiner variants, and casing variants of the same concept.
+
+  DROP (remove entirely): generic words with no domain specificity (document, table, result, section, page); standalone verbs/adjectives/adverbs/function words; fragments that can't be repaired; OCR/extraction artifacts, stray numbers, lone units, symbols, encoding errors; document boilerplate (appendix, figure, header, footer, revision); personal names, single dates, page references.
+
+  Judgment: don't use the counts as the sole criterion — a high count can be a generic word, a low count a valid specialized term. When genuinely uncertain, KEEP it for human review (omit it); only DROP what is clearly generic or junk.
+
+  Do NOT compute or output any counts — counts and examples are handled outside your response. Refer to every term only by its "id".
+
+  Every decision object MUST include a short "reason" — keep it terse (a few words, roughly 10 words maximum), e.g. "plural variant", "generic, no domain specificity", "strip leading determiner".
+
+  Output: return ONLY a JSON object, no commentary, no markdown fences, in exactly this form:
+
+  {
+    "decisions": [
+      { "action": "rename", "id": 23, "canonical_term": "syringe barrel", "reason": "..." },
+      { "action": "merge", "canonical_id": 41, "merge_ids": [7, 12], "canonical_term": "sensor", "reason": "..." },
+      { "action": "drop", "id": 19, "reason": "..." }
+    ]
+  }
+
+  Emit a decision only for terms you rename, merge, or drop. Terms you want to keep unchanged must NOT appear in the output.
+
+translation: |
+  You are a terminology specialist building a bilingual glossary for a translation project.
+
+  Source material specifics:
+  Domain: {{DOMAIN}}
+  Context: {{CONTEXT}}
+
+  You will receive a JSON array of cleaned source terms. For each term, provide a translation into {{TARGET_LANGUAGE}} and a concise definition in {{DEFINITION_LANGUAGE}}, both appropriate to the domain and context above.
+
+  Each input object contains:
+    - "id": a unique integer identifying the term (echo it back unchanged)
+    - "source_term": the source-language term to translate and define
+    - "examples": up to three sample sentences showing the term in context (the term is wrapped in **double asterisks**); use them to determine the correct sense
+
+  For each term produce:
+    - "definition": a concise, domain-specific definition written in {{DEFINITION_LANGUAGE}}, one or two sentences, describing what the term means in this context. Do not merely restate the term.
+    - "target_term": the established, domain-appropriate {{TARGET_LANGUAGE}} equivalent. Prefer the conventional term used in the field over a literal translation. If the source term is a proper name, product name, or an acronym that is conventionally left untranslated, keep it as-is.
+
+  Guidance:
+    - Establish the correct sense of the term from its examples first, then write the definition and choose the translation for that same sense, so the two always agree.
+    - Do not invent meaning not supported by the term or its examples; if a term is genuinely ambiguous and the examples don't resolve it, use the most likely domain reading and keep the definition cautious.
+    - Be consistent: translate the same concept the same way across the whole list.
+    - Do not add, drop, merge, or reorder terms. Return exactly one object per input id.
+
+  Output: return ONLY a JSON object, no commentary, no markdown fences, in exactly this form:
+
+  {
+    "translations": [
+      { "id": 41, "definition": "...", "target_term": "sensore" },
+      { "id": 23, "definition": "...", "target_term": "camicia della siringa" }
+    ]
+  }
+
+# ---------------------------------------------------------------------------
+# TMX extraction prompt: used for terms that carry verified human translations
+# from a TMX (aligned source/target example segments). The model extracts the
+# established target term from the target segment rather than translating from
+# scratch, and writes a definition for it. Placeholders: {{DOMAIN}},
+# {{CONTEXT}}, {{TARGET_LANGUAGE}}, {{DEFINITION_LANGUAGE}}.
+# ---------------------------------------------------------------------------
+tmx_translation: |
+  You are a terminology specialist building a bilingual glossary for a translation project.
+
+  Source material specifics:
+  Domain: {{DOMAIN}}
+  Context: {{CONTEXT}}
+
+  You will receive a JSON array of source terms, each accompanied by one or more ALIGNED example pairs taken from a translation memory: a source-language segment and its corresponding, human-verified {{TARGET_LANGUAGE}} translation. Because these translations are human-produced and verified, they are authoritative — your task is primarily to EXTRACT the established {{TARGET_LANGUAGE}} equivalent of each term from the aligned target segments, not to translate it yourself. You will also write a concise definition of each term in {{DEFINITION_LANGUAGE}}.
+
+  Each input object contains:
+    - "id": a unique integer identifying the term (echo it back unchanged)
+    - "source_term": the source-language term
+    - "aligned_examples": a list of {"source": ..., "target": ...} pairs; in each, the source segment contains the term (wrapped in **double asterisks**) and the target segment is its verified {{TARGET_LANGUAGE}} translation
+    - "source_only_examples" (optional): extra source segments with no aligned translation, for additional context only
+
+  For each term produce:
+    - "definition": a concise, domain-specific definition written in {{DEFINITION_LANGUAGE}}, one or two sentences, describing what the term means in this context. Base it on the sense shown in the examples. Do not merely restate the term.
+    - "target_term": the term's established {{TARGET_LANGUAGE}} equivalent AS IT ACTUALLY APPEARS in the aligned target segments. Identify how the source term is rendered in the target and use that form. Prefer this verified rendering over any translation you would produce on your own.
+    - "target_surface_forms": a list of EVERY distinct surface form the term actually takes across the aligned target segments, each copied VERBATIM (character-for-character, keeping its exact inflection, case, and any attached article) from the target segment where it appears. Include every inflected variant you see (e.g. singular and plural). Do NOT normalise these to the citation form. Use an empty list if you cannot identify the term in any target segment. (This list is used to highlight the term in the examples; "target_term" remains the canonical glossary form and may differ from these.)
+    - "notes": see the rules below; use "" when there is nothing to flag.
+
+  Rules:
+    - CONSISTENT TRANSLATIONS: if the aligned target segments render the term the same way, use that form as "target_term" and leave "notes" empty.
+    - CONFLICTING TRANSLATIONS: if the term is rendered DIFFERENTLY across the aligned target segments, choose the single rendering you judge most correct and appropriate for this domain, and record the inconsistency in "notes" (e.g. "Inconsistent in TM: 'valvola' vs 'rubinetto'; chose 'valvola'.").
+    - TERM NOT LOCATABLE: if the source term appears in the source segment but you cannot confidently identify its equivalent in the target segment (paraphrase, restructuring, or the term was dropped), then translate the term yourself from context, and note this in "notes" (e.g. "Not locatable in TM target; translated from context.").
+    - DEFINITION: define the sense the term has in the examples; if that sense is genuinely unclear, use the most likely domain reading and keep the definition cautious. The definition must describe the same concept as the chosen "target_term".
+    - Do not add, drop, merge, or reorder terms. Return exactly one object per input id.
+
+  Output: return ONLY a JSON object, no commentary, no markdown fences, in exactly this form:
+
+  {
+    "translations": [
+      { "id": 41, "definition": "...", "target_term": "sensore", "target_surface_forms": ["sensore", "sensori"], "notes": "" },
+      { "id": 23, "definition": "...", "target_term": "valvola", "target_surface_forms": ["valvola"], "notes": "Inconsistent in TM: 'valvola' vs 'rubinetto'; chose 'valvola'." }
+    ]
+  }
+
+# ---------------------------------------------------------------------------
+# TMX target-language resolution prompt: used at pre-flight (only when TMX
+# files are present and the translate step is on) to match the user's freely
+# typed target language against the target-language codes actually found in
+# each TMX file. Placeholders: {{TARGET_LANGUAGE}}, {{FILES_JSON}}.
+# The model must return ONLY the JSON object described below.
+# ---------------------------------------------------------------------------
+tmx_language_resolution: |
+  You are helping match translation-memory target languages to a user's requested target language.
+
+  The user's requested target language is: "{{TARGET_LANGUAGE}}"
+
+  Below is a JSON object mapping each TMX file name to the list of target-language codes (BCP-47 / ISO style) found in that file. For each file, decide which of ITS codes are compatible with the user's requested target language. A code is compatible if it denotes the same language; any region counts as compatible (e.g. "it-IT" and "it-CH" both match "Italian"). The user may write the language name loosely or with a typo (e.g. "Standard Italian", "Brazilian Portuguese", "Flemish").
+
+  Files and their codes:
+  {{FILES_JSON}}
+
+  Return ONLY a JSON object, no commentary, no markdown fences, of the form:
+  { "files": { "<filename>": { "matches": ["<code>", ...] }, ... } }
+
+  Each file's "matches" must be a subset of that file's given codes (use the codes exactly as given). Use an empty list when none of the file's codes match the requested language.

@@ -1,0 +1,10 @@
+# Core (NLP-only extraction)
+spacy>=3.7
+openpyxl
+pdfplumber
+python-docx
+
+# Optional: only needed for the AI cleaning / translation steps
+anthropic
+openai
+pyyaml
